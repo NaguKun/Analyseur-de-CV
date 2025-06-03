@@ -1,0 +1,103 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Light mode - Softer v0 style */
+    --background: 0 0% 100%; /* Pure white */
+    --foreground: 222.2 84% 4.9%; /* Very dark gray */
+    --card: 0 0% 100%; /* Pure white */
+    --card-foreground: 222.2 84% 4.9%; /* Very dark gray */
+    --popover: 0 0% 100%; /* Pure white */
+    --popover-foreground: 222.2 84% 4.9%; /* Very dark gray */
+    --primary: 142.1 50% 42%; /* Softer emerald green - reduced saturation */
+    --primary-foreground: 355.7 100% 97.3%; /* White */
+    --secondary: 210 40% 98%; /* Very light blue-gray */
+    --secondary-foreground: 222.2 84% 4.9%; /* Very dark gray */
+    --muted: 210 40% 98%; /* Very light blue-gray */
+    --muted-foreground: 215.4 16.3% 46.9%; /* Medium gray */
+    --accent: 142.1 50% 42%; /* Softer emerald green */
+    --accent-foreground: 355.7 100% 97.3%; /* White */
+    --destructive: 0 84.2% 60.2%; /* Red */
+    --destructive-foreground: 210 40% 98%; /* Light */
+    --border: 214.3 31.8% 91.4%; /* Light gray border */
+    --input: 214.3 31.8% 91.4%; /* Light gray input */
+    --ring: 142.1 50% 42%; /* Softer emerald green */
+    --radius: 0.5rem;
+  }
+
+  .dark {
+    /* Dark mode - Softer v0 style */
+    --background: 222.2 84% 4.9%; /* Very dark gray */
+    --foreground: 210 40% 98%; /* Light gray */
+    --card: 222.2 84% 4.9%; /* Very dark gray */
+    --card-foreground: 210 40% 98%; /* Light gray */
+    --popover: 222.2 84% 4.9%; /* Very dark gray */
+    --popover-foreground: 210 40% 98%; /* Light gray */
+    --primary: 142.1 45% 55%; /* Softer, lighter emerald for dark mode */
+    --primary-foreground: 144.9 80.4% 10%; /* Very dark green */
+    --secondary: 217.2 32.6% 17.5%; /* Dark blue-gray */
+    --secondary-foreground: 210 40% 98%; /* Light gray */
+    --muted: 217.2 32.6% 17.5%; /* Dark blue-gray */
+    --muted-foreground: 215 20.2% 65.1%; /* Medium gray */
+    --accent: 142.1 45% 55%; /* Softer, lighter emerald */
+    --accent-foreground: 144.9 80.4% 10%; /* Very dark green */
+    --destructive: 0 62.8% 30.6%; /* Dark red */
+    --destructive-foreground: 210 40% 98%; /* Light */
+    --border: 217.2 32.6% 17.5%; /* Dark border */
+    --input: 217.2 32.6% 17.5%; /* Dark input */
+    --ring: 142.1 45% 55%; /* Softer, lighter emerald */
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground font-mono;
+  }
+}
+
+/* Light mode scrollbar - softer green */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: hsl(210 40% 98%);
+}
+
+::-webkit-scrollbar-thumb {
+  background: hsl(142.1 50% 42%);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(142.1 50% 38%);
+}
+
+/* Dark mode scrollbar - softer green */
+.dark ::-webkit-scrollbar-track {
+  background: hsl(222.2 84% 4.9%);
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: hsl(142.1 45% 55%);
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: hsl(142.1 45% 60%);
+}
+
+/* Terminal cursor effect - softer green */
+.terminal-cursor::after {
+  content: "_";
+  animation: terminal-blink 1s infinite;
+  color: hsl(142.1 45% 50%);
+}
+
+.dark .terminal-cursor::after {
+  color: hsl(142.1 45% 55%);
+}

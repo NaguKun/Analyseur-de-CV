@@ -9,7 +9,7 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
 import io
 from app.core.config import settings
-from app.db.session import get_db
+# from app.db.session import get_db
 from app.services.cv_processor.processor import CVProcessor
 from app.services.llm.extractor import InformationExtractor
 from app.schemas.candidate import CandidateCreate
