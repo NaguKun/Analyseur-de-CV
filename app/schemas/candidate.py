@@ -1,6 +1,7 @@
-from pydantic import BaseModel, EmailStr, HttpUrl
+from pydantic import BaseModel, EmailStr, HttpUrl, Field, validator
 from typing import List, Optional
 from datetime import datetime
+import re
 
 # Base models for nested structures
 class EducationBase(BaseModel):
@@ -22,7 +23,6 @@ class WorkExperienceBase(BaseModel):
 
 class SkillBase(BaseModel):
     name: str
-    category: Optional[str] = None
 
 class ProjectBase(BaseModel):
     name: str
@@ -56,19 +56,63 @@ class ProjectCreate(ProjectBase):
 class CertificationCreate(CertificationBase):
     pass
 
-class CandidateCreate(BaseModel):
+class CandidateBase(BaseModel):
     full_name: str
     email: EmailStr
     phone: Optional[str] = None
     location: Optional[str] = None
-    education: List[EducationCreate]
-    work_experience: List[WorkExperienceCreate]
-    skills: List[str]  # List of skill names
-    projects: List[ProjectCreate]
-    certifications: List[CertificationCreate]
-    cv_file_id: Optional[str] = None  # Google Drive file ID
 
-# Response models (for output)
+    @validator('phone')
+    def validate_phone(cls, v):
+        if v is not None:
+            # Basic phone number validation
+            if not re.match(r'^\+?1?\d{9,15}$', v):
+                raise ValueError('Invalid phone number format')
+        return v
+
+class CandidateCreate(CandidateBase):
+    skills: Optional[List[str]] = None
+    education: Optional[List[EducationCreate]] = None
+    work_experience: Optional[List[WorkExperienceCreate]] = None
+    certifications: Optional[List[CertificationCreate]] = None
+    projects: Optional[List[ProjectCreate]] = None
+
+class CandidateUpdate(BaseModel):
+    full_name: Optional[str] = None
+    email: Optional[EmailStr] = None
+    phone: Optional[str] = None
+    location: Optional[str] = None
+    skills: Optional[List[str]] = None
+    cv_file_id: Optional[str] = None
+    cv_text: Optional[str] = None
+
+    @validator('phone')
+    def validate_phone(cls, v):
+        if v is not None:
+            if not re.match(r'^\+?1?\d{9,15}$', v):
+                raise ValueError('Invalid phone number format')
+        return v
+
+class CandidateResponse(CandidateBase):
+    id: int
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    skills: List[SkillBase] = []
+    cv_file_id: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+class CandidateDetail(CandidateResponse):
+    education: List[EducationBase] = []
+    work_experience: List[WorkExperienceBase] = []
+    certifications: List[CertificationBase] = []
+    projects: List[ProjectBase] = []
+    cv_text: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
 class Education(EducationBase):
     id: int
     candidate_id: int
@@ -99,26 +143,6 @@ class Project(ProjectBase):
 class Certification(CertificationBase):
     id: int
     candidate_id: int
-
-    class Config:
-        from_attributes = True
-
-class Candidate(BaseModel):
-    id: int
-    created_at: datetime
-    updated_at: Optional[datetime] = None
-    full_name: str
-    email: EmailStr
-    phone: Optional[str] = None
-    location: Optional[str] = None
-    cv_file_id: str  # Google Drive file ID
-    cv_text: str
-    cv_vector_id: Optional[str] = None
-    education: List[Education]
-    work_experience: List[WorkExperience]
-    skills: List[Skill]
-    projects: List[Project]
-    certifications: List[Certification]
 
     class Config:
         from_attributes = True

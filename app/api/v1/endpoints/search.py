@@ -1,88 +1,105 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, Depends, Query, HTTPException
 from typing import List, Optional
-from app.db.session import get_db
-from app.schemas.candidate import Candidate, CandidateSearch, CandidateFilter
-from app.services.search.search_service import SearchService
-from app.core.config import settings
+from app.core.supabase import get_supabase_client
+from app.schemas.candidate import CandidateDetail
+from app.services.search_service import SearchService
 import logging
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-@router.post("/semantic", response_model=List[Candidate])
-async def semantic_search(
-    search: CandidateSearch,
-    db: Session = Depends(get_db),
+@router.get("/semantic", response_model=List[CandidateDetail])
+def semantic_search(
+    query: str,
+    min_experience_years: Optional[int] = Query(None, ge=0, description="Minimum years of experience required"),
+    required_skills: Optional[List[str]] = Query(None, description="List of required skills"),
+    location: Optional[str] = None,
+    education_level: Optional[str] = None,
     limit: int = Query(10, ge=1, le=100),
-    offset: int = Query(0, ge=0)
+    offset: int = Query(0, ge=0),
+    supabase=Depends(get_supabase_client)
 ):
     """
-    Search candidates using semantic search on work experience and skills.
-    This endpoint uses vector similarity search to find candidates whose
-    experience and skills best match the search query.
+    Search candidates using semantic search with additional filters.
+    
+    - **query**: Search query text
+    - **min_experience_years**: Minimum years of experience required
+    - **required_skills**: List of required skills
+    - **location**: Location filter
+    - **education_level**: Education level filter
+    - **limit**: Maximum number of results to return
+    - **offset**: Number of results to skip
     """
     try:
-        search_service = SearchService(db)
-        results = await search_service.semantic_search(
-            query=search.query,
-            min_experience_years=search.min_experience_years,
-            required_skills=search.required_skills,
-            location=search.location,
-            education_level=search.education_level,
+        search_service = SearchService(supabase)
+        results = search_service.semantic_search(
+            query=query,
+            min_experience_years=min_experience_years,
+            required_skills=required_skills,
+            location=location,
+            education_level=education_level,
             limit=limit,
             offset=offset
         )
         return results
     except Exception as e:
-        logger.error(f"Error in semantic search: {str(e)}")
+        logger.error(f"Error performing semantic search: {str(e)}")
         raise HTTPException(
             status_code=500,
             detail=f"Search failed: {str(e)}"
         )
 
-@router.post("/filter", response_model=List[Candidate])
-async def filter_candidates(
-    filter_params: CandidateFilter,
-    db: Session = Depends(get_db),
+@router.get("/filter", response_model=List[CandidateDetail])
+def filter_candidates(
+    min_experience_years: Optional[int] = Query(None, ge=0, description="Minimum years of experience required"),
+    required_skills: Optional[List[str]] = Query(None, description="List of required skills"),
+    location: Optional[str] = None,
+    education_level: Optional[str] = None,
     limit: int = Query(10, ge=1, le=100),
-    offset: int = Query(0, ge=0)
+    offset: int = Query(0, ge=0),
+    supabase=Depends(get_supabase_client)
 ):
     """
-    Filter candidates based on specific criteria.
-    This endpoint uses traditional database queries to filter candidates
-    based on exact matches of skills, location, experience, etc.
+    Filter candidates based on various criteria.
+    
+    - **min_experience_years**: Minimum years of experience required
+    - **required_skills**: List of required skills
+    - **location**: Location filter
+    - **education_level**: Education level filter
+    - **limit**: Maximum number of results to return
+    - **offset**: Number of results to skip
     """
     try:
-        search_service = SearchService(db)
-        results = await search_service.filter_candidates(
-            skills=filter_params.skills,
-            location=filter_params.location,
-            min_experience_years=filter_params.min_experience_years,
-            education_level=filter_params.education_level,
+        search_service = SearchService(supabase)
+        results = search_service.filter_candidates(
+            skills=required_skills,
+            location=location,
+            min_experience_years=min_experience_years,
+            education_level=education_level,
             limit=limit,
             offset=offset
         )
         return results
     except Exception as e:
-        logger.error(f"Error in filter search: {str(e)}")
+        logger.error(f"Error filtering candidates: {str(e)}")
         raise HTTPException(
             status_code=500,
-            detail=f"Filter search failed: {str(e)}"
+            detail=f"Filtering failed: {str(e)}"
         )
 
 @router.get("/skills", response_model=List[str])
-async def get_skills(
-    db: Session = Depends(get_db),
-    limit: int = Query(100, ge=1, le=1000)
+def get_skills(
+    limit: int = Query(100, ge=1, le=1000, description="Maximum number of skills to return"),
+    supabase=Depends(get_supabase_client)
 ):
     """
-    Get a list of all unique skills in the database.
-    This endpoint is useful for building skill filters in the UI.
+    Get all available skills.
+    
+    - **limit**: Maximum number of skills to return
     """
     try:
-        search_service = SearchService(db)
-        return await search_service.get_all_skills(limit=limit)
+        search_service = SearchService(supabase)
+        return search_service.get_all_skills(limit=limit)
     except Exception as e:
         logger.error(f"Error getting skills: {str(e)}")
         raise HTTPException(
@@ -91,17 +108,18 @@ async def get_skills(
         )
 
 @router.get("/locations", response_model=List[str])
-async def get_locations(
-    db: Session = Depends(get_db),
-    limit: int = Query(100, ge=1, le=1000)
+def get_locations(
+    limit: int = Query(100, ge=1, le=1000, description="Maximum number of locations to return"),
+    supabase=Depends(get_supabase_client)
 ):
     """
-    Get a list of all unique locations in the database.
-    This endpoint is useful for building location filters in the UI.
+    Get all available locations.
+    
+    - **limit**: Maximum number of locations to return
     """
     try:
-        search_service = SearchService(db)
-        return await search_service.get_all_locations(limit=limit)
+        search_service = SearchService(supabase)
+        return search_service.get_all_locations(limit=limit)
     except Exception as e:
         logger.error(f"Error getting locations: {str(e)}")
         raise HTTPException(

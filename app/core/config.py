@@ -7,6 +7,25 @@ from dotenv import load_dotenv
 load_dotenv()
 
 class Settings(BaseSettings):
+    # API Settings
+    API_V1_STR: str = "/api/v1"
+    PROJECT_NAME: str = "Candidate Management API"
+    
+    # Supabase Settings
+    SUPABASE_URL: str = os.getenv("SUPABASE_URL", "")
+    SUPABASE_KEY: str = os.getenv("SUPABASE_KEY", "")
+    
+    # OpenAI Settings (for embeddings)
+    OPENAI_API_KEY: Optional[str] = os.getenv("OPENAI_API_KEY")
+    
+    # Vector Search Settings
+    VECTOR_DIMENSION: int = 1536  # OpenAI ada-002 embedding dimension
+    SIMILARITY_THRESHOLD: float = 0.7
+    
+    # File Upload Settings
+    MAX_UPLOAD_SIZE: int = 10 * 1024 * 1024  # 10MB
+    ALLOWED_EXTENSIONS: set = {"pdf", "doc", "docx"}
+    
     # Application Settings
     APP_NAME: str = "CV Analysis System"
     ENVIRONMENT: str = "development"
@@ -15,13 +34,10 @@ class Settings(BaseSettings):
     
     # Database Settings (Supabase)
     DATABASE_URL: str
-    SUPABASE_URL: str
-    SUPABASE_KEY: str
     SUPABASE_SERVICE_KEY: str
     VECTOR_DB_TABLE: str = "candidate_embeddings"
     
     # LLM Settings
-    OPENAI_API_KEY: str
     LLM_PROVIDER: str = "openai"
     OPENAI_MODEL: str = "gpt-3.5-turbo"
     EMBEDDING_MODEL: str = "text-embedding-ada-002"  # Updated to newer, faster model
@@ -37,7 +53,6 @@ class Settings(BaseSettings):
     
     # File Upload Settings
     UPLOAD_FOLDER: str = "./data/uploads"
-    MAX_UPLOAD_SIZE: int = 10 * 1024 * 1024
     
     # Security
     SECRET_KEY: str
