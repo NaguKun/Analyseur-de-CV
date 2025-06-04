@@ -21,69 +21,92 @@ class SearchService:
         offset: int = 0
     ) -> List[CandidateDetail]:
         """
-        Perform semantic search using vector similarity on experience and skills embeddings
+        Perform semantic search using vector similarity on experience and skills embeddings,
+        with filters compatible with Supabase schema.
         """
         try:
             # Generate embeddings for the search query
             experience_embedding, skills_embedding = generate_query_embeddings(query)
-            
+
             # Start with base query
-            base_query = self.supabase.table('candidates')\
-                .select('id, experience_embedding, skills_embedding')\
-                .range(offset, offset + limit - 1)
-            
-            # Apply filters
+            base_query = self.supabase.table('candidates') \
+                .select('id, experience_embedding, skills_embedding')
+
+            # Filter: location
             if location:
                 base_query = base_query.ilike('location', f'%{location}%')
-            
-            if min_experience_years:
-                base_query = base_query.filter(
-                    'id',
-                    'in',
-                    self.supabase.table('work_experience')
-                    .select('candidate_id')
-                    .filter('end_date', 'is', 'null')
-                    .or_('end_date.gt.now()')
-                    .execute()
-                    .data
-                )
-            
+
+            # Filter: education_level (by degree field)
             if education_level:
-                base_query = base_query.filter(
-                    'id',
-                    'in',
-                    self.supabase.table('education')
-                    .select('candidate_id')
-                    .eq('level', education_level)
+                # Get candidate_ids with matching degree
+                edu_res = self.supabase.table('education') \
+                    .select('candidate_id') \
+                    .eq('degree', education_level) \
                     .execute()
-                    .data
-                )
-            
+                edu_ids = [row['candidate_id'] for row in edu_res.data or []]
+                if edu_ids:
+                    base_query = base_query.in_('id', edu_ids)
+                else:
+                    return []  # No candidates match
+
+            # Filter: required_skills (must have ALL skills)
             if required_skills:
-                base_query = base_query.filter(
-                    'id',
-                    'in',
-                    self.supabase.table('candidate_skills')
-                    .select('candidate_id')
-                    .filter(
-                        'skill_id',
-                        'in',
-                        self.supabase.table('skills')
-                        .select('id')
-                        .in_('name', required_skills)
-                        .execute()
-                        .data
-                    )
+                # Get skill_ids for required_skills
+                skill_res = self.supabase.table('skills') \
+                    .select('id, name') \
+                    .in_('name', required_skills) \
                     .execute()
-                    .data
-                )
-            
+                skill_ids = [row['id'] for row in skill_res.data or []]
+                if not skill_ids or len(skill_ids) < len(required_skills):
+                    return []  # Some skills not found
+                # Get candidate_ids that have all required skills
+                cand_skill_res = self.supabase.table('candidate_skills') \
+                    .select('candidate_id, skill_id') \
+                    .in_('skill_id', skill_ids) \
+                    .execute()
+                # Count skills per candidate
+                from collections import Counter
+                cand_skill_pairs = [(row['candidate_id'], row['skill_id']) for row in cand_skill_res.data or []]
+                cand_skill_count = Counter([pair[0] for pair in cand_skill_pairs])
+                # Only candidates with all required skills
+                candidate_ids = [cand_id for cand_id, count in cand_skill_count.items() if count == len(skill_ids)]
+                if not candidate_ids:
+                    return []
+                base_query = base_query.in_('id', candidate_ids)
+
+            # Filter: min_experience_years (sum years in work_experience)
+            if min_experience_years:
+                # Get candidate_ids with enough experience
+                work_exp_res = self.supabase.table('work_experience') \
+                    .select('candidate_id, start_date, end_date') \
+                    .execute()
+                from datetime import datetime
+                from collections import defaultdict
+                exp_years = defaultdict(float)
+                now = datetime.now()
+                for row in work_exp_res.data or []:
+                    start = row.get('start_date')
+                    end = row.get('end_date') or now.isoformat()
+                    try:
+                        start_dt = datetime.fromisoformat(str(start))
+                        end_dt = datetime.fromisoformat(str(end))
+                        years = (end_dt - start_dt).days / 365.25
+                        exp_years[row['candidate_id']] += max(0, years)
+                    except Exception:
+                        continue
+                qualified_ids = [cand_id for cand_id, years in exp_years.items() if years >= min_experience_years]
+                if not qualified_ids:
+                    return []
+                base_query = base_query.in_('id', qualified_ids)
+
+            # Pagination
+            base_query = base_query.range(offset, offset + limit - 1)
+
             # Execute the query
             result = base_query.execute()
-            
             if not result.data:
                 return []
-            
+
             # Calculate similarity scores and sort
             candidates_with_scores = []
             for candidate in result.data:
@@ -98,12 +121,13 @@ class SearchService:
                     )
                     avg_similarity = (exp_similarity + skills_similarity) / 2
                     candidates_with_scores.append((candidate['id'], avg_similarity))
-            
+
             # Sort by similarity score
             candidates_with_scores.sort(key=lambda x: x[1], reverse=True)
-            
-            # Get full candidate details
+
+            # Get full candidate details (top N)
             candidate_ids = [c[0] for c in candidates_with_scores[:limit]]
+
             return self._get_candidates_by_ids(candidate_ids)
             
         except Exception as e:

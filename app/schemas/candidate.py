@@ -65,8 +65,8 @@ class CandidateBase(BaseModel):
     @validator('phone')
     def validate_phone(cls, v):
         if v is not None:
-            # Basic phone number validation
-            if not re.match(r'^\+?1?\d{9,15}$', v):
+            # Relaxed phone number validation: allow +, digits, spaces, dashes
+            if not re.match(r'^\+?\d[\d\s\-]{8,19}$', v):
                 raise ValueError('Invalid phone number format')
         return v
 

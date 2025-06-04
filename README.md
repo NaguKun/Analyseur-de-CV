@@ -28,6 +28,8 @@ cv_analysis_system/
 ├── requirements.txt      # Project dependencies
 └── README.md            # Project documentation
 ```
+## User Flow
+![alt text](image.png)
 
 ## Setup and Installation
 
