@@ -16,6 +16,8 @@ from app.schemas.candidate import (
     ProjectCreate,
     CertificationCreate
 )
+import re
+from pydantic import HttpUrl
 
 logger = logging.getLogger(__name__)
 
@@ -58,15 +60,15 @@ class InformationExtractor:
         - `institution`: string (required)
         - `degree`: string (e.g., "Bachelor's in Computer Science")
         - `field_of_study`: string (required)
-        - `start_date`: ISO date (YYYY-MM-DD, use "YYYY-01-01" if only year known)
-        - `end_date`: ISO date or null if ongoing
+        - `start_date`: ISO date (YYYY-MM-DD, never use text like "Unknown")
+        - `end_date`: ISO date or null if ongoing. If unknown, infer plausible fake date.
         - `description`: string or null
 
         ### WORK EXPERIENCE (Array of objects):
         Each must contain:
         - `company`: string (use "Anonymous Corp" if unknown)
         - `position`: string (use "Unknown Role" if missing)
-        - `start_date`: ISO date (required)
+        - `start_date`: ISO date (use "YYYY-01-01" if only year known, never use non-date strings)
         - `end_date`: ISO date or null if current
         - `description`: string (required, summarize key responsibilities)
         - `achievements`: array of strings or null
@@ -82,22 +84,23 @@ class InformationExtractor:
         - `start_date`: ISO date or null
         - `end_date`: ISO date or null
         - `technologies`: array of strings or null
-        - `url`: valid HTTP URL or null
+        - `url`: valid HTTP URL (must start with http:// or https://) or null. If you cannot infer a valid URL, set to null. NEVER return a partial or invalid URL.
 
         ### CERTIFICATIONS (Array of objects):
         Each must contain:
         - `name`: string (required)
         - `issuer`: string (use "Unknown Issuer" if missing)
-        - `issue_date`: ISO date (required)
+        - `issue_date`: ISO date (e.g., "1900-01-01", generate plausible date if missing)
         - `expiry_date`: ISO date or null
         - `credential_id`: string or null
-        - `credential_url`: HTTP URL or null
+        - `credential_url`: HTTP URL (must start with http:// or https://) or null. If you cannot infer a valid URL, set to null. NEVER return a partial or invalid URL.
 
         ---
         🛠 **PROCESSING RULES**:
         1. 📅 **Date Handling**:
-        - Always use ISO format (YYYY-MM-DD)
-        - Use "01-01" for unknown month/day (e.g., "2015-01-01")
+        - Always use ISO format (YYYY-MM-DD), never return free-text like "Unknown Start Date"
+        - Use "01-01" as default month/day if only year is known (e.g., "2015-01-01")
+        - If date is missing, infer a **realistic fake date** instead of leaving blank
         - For current positions: set `end_date` to null
 
         2. 🧠 **Inference Guidelines**:
@@ -176,7 +179,12 @@ class InformationExtractor:
                 # First try to parse as is
                 parsed_data = self.output_parser.parse(result_text)
                 # Convert to dict immediately to avoid Pydantic model issues
-                return parsed_data.model_dump() if hasattr(parsed_data, 'model_dump') else parsed_data
+                data = parsed_data.model_dump() if hasattr(parsed_data, 'model_dump') else parsed_data
+                # Sanitize dates before returning
+                data = self.sanitize_dates(data)
+                # Sanitize urls before returning
+                data = self.sanitize_urls(data)
+                return data
             except Exception as parse_error:
                 logger.warning(f"Initial parse failed, attempting to clean and retry: {str(parse_error)}")
                 
@@ -184,8 +192,12 @@ class InformationExtractor:
                 cleaned_text = self._clean_llm_response(result_text)
                 try:
                     parsed_data = self.output_parser.parse(cleaned_text)
-                    # Convert to dict immediately to avoid Pydantic model issues
-                    return parsed_data.model_dump() if hasattr(parsed_data, 'model_dump') else parsed_data
+                    data = parsed_data.model_dump() if hasattr(parsed_data, 'model_dump') else parsed_data
+                    # Sanitize dates before returning
+                    data = self.sanitize_dates(data)
+                    # Sanitize urls before returning
+                    data = self.sanitize_urls(data)
+                    return data
                 except Exception as second_parse_error:
                     logger.error(f"Failed to parse even after cleaning: {str(second_parse_error)}")
                     raise ValueError(f"Failed to parse LLM response into valid CandidateCreate format: {str(second_parse_error)}")
@@ -244,6 +256,13 @@ class InformationExtractor:
             # Convert result to dict if it's a Pydantic model
             result_dict = result.model_dump() if hasattr(result, 'model_dump') else result
             
+            # Ensure all list fields are initialized as lists, not None
+            for field in ["education", "work_experience", "skills", "projects", "certifications"]:
+                if combined.get(field) is None:
+                    combined[field] = []
+                if result_dict.get(field) is None:
+                    result_dict[field] = []
+            
             # Merge education (avoid duplicates)
             combined["education"].extend([
                 edu for edu in result_dict["education"]
@@ -272,20 +291,69 @@ class InformationExtractor:
             ])
         
         # Convert HttpUrl objects to strings before returning
-        def convert_httpurl_to_str(data):
-            if isinstance(data, dict):
-                for key, value in data.items():
-                    data[key] = convert_httpurl_to_str(value)
-            elif isinstance(data, list):
-                data = [convert_httpurl_to_str(item) for item in data]
-            elif isinstance(data, object) and hasattr(data, '__class__') and data.__class__.__name__ == 'HttpUrl':
-                return str(data)
-            return data
-
-        combined = convert_httpurl_to_str(combined)
-
+        combined = self.convert_httpurl_to_str(combined)
         return combined
     
+    def sanitize_dates(self, data):
+        """
+        Recursively replace invalid or missing date strings with '1900-01-01'.
+        """
+        fake_date = "1900-01-01"
+        date_pattern = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+        invalid_date_pattern = re.compile(r"[Yy]{4}-\d{2}-\d{2}")
+
+        if isinstance(data, dict):
+            for key, value in data.items():
+                if 'date' in key and isinstance(value, str):
+                    if not date_pattern.match(value):
+                        if invalid_date_pattern.match(value) or not value or value.lower() == 'none':
+                            data[key] = fake_date
+                elif isinstance(value, (dict, list)):
+                    self.sanitize_dates(value)
+        elif isinstance(data, list):
+            for item in data:
+                self.sanitize_dates(item)
+        return data
+
+    def sanitize_urls(self, data):
+        """
+        Recursively ensure all URL fields are valid. If not, prepend 'https://' or set to None.
+        """
+        url_pattern = re.compile(r'^(http|https)://')
+        if isinstance(data, dict):
+            for key, value in data.items():
+                if 'url' in key and isinstance(value, str):
+                    if not url_pattern.match(value):
+                        # If it looks like a domain, prepend https://, else set to None
+                        if '.' in value:
+                            data[key] = 'https://' + value
+                        else:
+                            data[key] = None
+                elif isinstance(value, (dict, list)):
+                    self.sanitize_urls(value)
+        elif isinstance(data, list):
+            for item in data:
+                self.sanitize_urls(item)
+        return data
+
+    def convert_httpurl_to_str(self, data):
+        """
+        Recursively convert all HttpUrl objects to strings in a dict or list.
+        """
+        if isinstance(data, dict):
+            for key, value in data.items():
+                if isinstance(value, HttpUrl):
+                    data[key] = str(value)
+                elif isinstance(value, (dict, list)):
+                    self.convert_httpurl_to_str(value)
+        elif isinstance(data, list):
+            for i, item in enumerate(data):
+                if isinstance(item, HttpUrl):
+                    data[i] = str(item)
+                elif isinstance(item, (dict, list)):
+                    self.convert_httpurl_to_str(item)
+        return data
+
     def extract_information(self, cv_text: str) -> CandidateCreate:
         """
         Extract structured information from CV text using OpenAI.
@@ -318,6 +386,9 @@ class InformationExtractor:
             # Remove any extra fields that aren't in CandidateCreate
             candidate_dict.pop('experience_embedding', None)
             candidate_dict.pop('skills_embedding', None)
+            
+            # Convert all HttpUrl objects to strings before creating CandidateCreate
+            candidate_dict = self.convert_httpurl_to_str(candidate_dict)
             
             # Create final CandidateCreate instance
             return CandidateCreate(**candidate_dict)

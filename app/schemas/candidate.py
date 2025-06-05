@@ -65,8 +65,8 @@ class CandidateBase(BaseModel):
     @validator('phone')
     def validate_phone(cls, v):
         if v is not None:
-            # Relaxed phone number validation: allow +, digits, spaces, dashes
-            if not re.match(r'^\+?\d[\d\s\-]{8,19}$', v):
+            # Relaxed phone number validation: allow +, digits, spaces, dashes, parentheses
+            if not re.match(r'^[\+\d\s\-\(\)]{8,25}$', v):
                 raise ValueError('Invalid phone number format')
         return v
 
@@ -76,6 +76,7 @@ class CandidateCreate(CandidateBase):
     work_experience: Optional[List[WorkExperienceCreate]] = None
     certifications: Optional[List[CertificationCreate]] = None
     projects: Optional[List[ProjectCreate]] = None
+    cv_file_id: Optional[str] = None
 
 class CandidateUpdate(BaseModel):
     full_name: Optional[str] = None
