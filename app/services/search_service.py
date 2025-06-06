@@ -177,78 +177,104 @@ class SearchService:
         offset: int = 0
     ) -> List[CandidateDetail]:
         """
-        Filter candidates based on specific criteria using traditional database queries
+        Filter candidates based on specific criteria using traditional database queries.
+        Returns a list of CandidateDetail.
         """
         try:
-            # Start with base query
-            query = self.supabase.table('candidates')\
-                .select('id')\
-                .range(offset, offset + limit - 1)
-            
-            # Apply filters
+            candidate_ids = None
+
+            # Filter by location
             if location:
-                query = query.ilike('location', f'%{location}%')
-            
-            if min_experience_years:
-                # Filter by experience using a subquery
-                query = query.filter(
-                    'id',
-                    'in',
-                    ','.join(str(row['candidate_id']) for row in self.supabase.table('work_experience')
-                    .select('candidate_id')
-                    .filter('end_date', 'is', 'null')
-                    .or_('end_date.gt.now()')
+                loc_res = self.supabase.table('candidates')\
+                    .select('id')\
+                    .ilike('location', f'%{location}%')\
                     .execute()
-                    .data or [])
-                )
-            
+                location_ids = {row['id'] for row in loc_res.data or []}
+                print(f"[DEBUG] Location filter matched IDs: {location_ids}")
+                candidate_ids = location_ids if candidate_ids is None else candidate_ids & location_ids
+
+            # Filter by education level
             if education_level:
-                # Filter by education level
-                query = query.filter(
-                    'id',
-                    'in',
-                    ','.join(str(row['candidate_id']) for row in self.supabase.table('education')
-                    .select('candidate_id')
-                    .eq('degree', education_level)
+                edu_res = self.supabase.table('education')\
+                    .select('candidate_id')\
+                    .eq('degree', education_level)\
                     .execute()
-                    .data or [])
-                )
-            
+                edu_ids = {row['candidate_id'] for row in edu_res.data or []}
+                print(f"[DEBUG] Education filter matched IDs: {edu_ids}")
+                candidate_ids = edu_ids if candidate_ids is None else candidate_ids & edu_ids
+
+            # Filter by skills (must have all skills)
             if skills:
-                # Filter by skills
-                query = query.filter(
-                    'id',
-                    'in',
-                    ','.join(str(row['candidate_id']) for row in self.supabase.table('candidate_skills')
-                    .select('candidate_id')
-                    .filter(
-                        'skill_id',
-                        'in',
-                        ','.join(str(row['id']) for row in self.supabase.table('skills')
-                            .select('id')
-                            .in_('name', ','.join(skills))
-                            .execute()
-                            .data or [])
-                    )
+                skill_res = self.supabase.table('skills')\
+                    .select('id, name')\
+                    .in_('name', skills)\
                     .execute()
-                    .data or []
-                )
-                    .data
-                )
-            
-            # Execute the query
-            result = query.execute()
-            
-            if not result.data:
+                skill_ids = [row['id'] for row in skill_res.data or []]
+                print(f"[DEBUG] Skill names: {skills} → skill IDs found: {skill_ids}")
+
+                if not skill_ids or len(skill_ids) < len(skills):
+                    print("[DEBUG] Not all skills found → returning empty result")
+                    return []
+
+                cand_skill_res = self.supabase.table('candidate_skills')\
+                    .select('candidate_id, skill_id')\
+                    .in_('skill_id', skill_ids)\
+                    .execute()
+                from collections import Counter
+                cand_skill_pairs = [(row['candidate_id'], row['skill_id']) for row in cand_skill_res.data or []]
+                skill_count = Counter([pair[0] for pair in cand_skill_pairs])
+                skill_match_ids = {cand_id for cand_id, count in skill_count.items() if count == len(skill_ids)}
+                print(f"[DEBUG] Skills match candidate IDs: {skill_match_ids}")
+                candidate_ids = skill_match_ids if candidate_ids is None else candidate_ids & skill_match_ids
+
+            # Filter by experience
+            if min_experience_years:
+                work_exp_res = self.supabase.table('work_experience')\
+                    .select('candidate_id, start_date, end_date')\
+                    .execute()
+                from collections import defaultdict
+                from datetime import datetime
+                now = datetime.now()
+                exp_years = defaultdict(float)
+                for row in work_exp_res.data or []:
+                    start = row.get('start_date')
+                    end = row.get('end_date') or now.isoformat()
+                    try:
+                        start_dt = datetime.fromisoformat(str(start))
+                        end_dt = datetime.fromisoformat(str(end))
+                        years = (end_dt - start_dt).days / 365.25
+                        exp_years[row['candidate_id']] += max(0, years)
+                    except Exception as ex:
+                        print(f"[DEBUG] Error parsing dates: {ex} — row: {row}")
+                        continue
+                qualified_ids = {cand_id for cand_id, years in exp_years.items() if years >= min_experience_years}
+                print(f"[DEBUG] Experience filter matched IDs: {qualified_ids}")
+                candidate_ids = qualified_ids if candidate_ids is None else candidate_ids & qualified_ids
+
+            # Handle pagination and fallback if no filters
+            if candidate_ids is None:
+                result = self.supabase.table('candidates')\
+                    .select('id')\
+                    .range(offset, offset + limit - 1)\
+                    .execute()
+                candidate_ids = [row['id'] for row in result.data or []]
+                print(f"[DEBUG] No filters → return paginated candidates: {candidate_ids}")
+            else:
+                candidate_ids = list(candidate_ids)
+                print(f"[DEBUG] Candidate IDs after filters (before pagination): {candidate_ids}")
+                candidate_ids = candidate_ids[offset:offset + limit]
+                print(f"[DEBUG] Candidate IDs after pagination: {candidate_ids}")
+
+            if not candidate_ids:
+                print("[DEBUG] No matching candidates after all filters")
                 return []
-            
-            # Get full candidate details
-            candidate_ids = [candidate['id'] for candidate in result.data]
+
             return self._get_candidates_by_ids(candidate_ids)
-            
+
         except Exception as e:
-            logger.error(f"Error in filter search: {str(e)}")
+            print(f"[ERROR] filter_candidates: {str(e)}")
             raise
+
 
     def _get_candidates_by_ids(self, candidate_ids: List[int]) -> List[CandidateDetail]:
         """Get full candidate details for a list of candidate IDs"""
