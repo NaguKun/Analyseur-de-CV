@@ -106,27 +106,48 @@ class SearchService:
             result = base_query.execute()
             if not result.data:
                 return []
-
-            # Calculate similarity scores and sort
             candidates_with_scores = []
+            # Debug: print candidate count after filters
+           # print("Candidates after filters:", len(result.data))
+            import json
             for candidate in result.data:
-                if candidate['experience_embedding'] and candidate['skills_embedding']:
+                exp_emb = candidate['experience_embedding']
+                skills_emb = candidate['skills_embedding']
+
+                # Parse embeddings if they are JSON strings
+                if isinstance(exp_emb, str):
+                    try:
+                        exp_emb = json.loads(exp_emb)
+                    except Exception as e:
+                        continue
+                if isinstance(skills_emb, str):
+                    try:
+                        skills_emb = json.loads(skills_emb)
+                    except Exception as e:
+                        continue
+
+                if exp_emb and skills_emb:
                     exp_similarity = self._cosine_similarity(
                         experience_embedding,
-                        candidate['experience_embedding']
+                        exp_emb
                     )
                     skills_similarity = self._cosine_similarity(
                         skills_embedding,
-                        candidate['skills_embedding']
+                        skills_emb
                     )
                     avg_similarity = (exp_similarity + skills_similarity) / 2
+                    print(f"Candidate {candidate.get('id')} avg_similarity: {avg_similarity}")
                     candidates_with_scores.append((candidate['id'], avg_similarity))
 
-            # Sort by similarity score
-            candidates_with_scores.sort(key=lambda x: x[1], reverse=True)
+            # Filter by similarity threshold and sort
+            SIMILARITY_THRESHOLD = 0.8
+            filtered_candidates = [
+                (cid, score) for cid, score in candidates_with_scores if score >= SIMILARITY_THRESHOLD
+            ]
+            filtered_candidates.sort(key=lambda x: x[1], reverse=True)
 
             # Get full candidate details (top N)
-            candidate_ids = [c[0] for c in candidates_with_scores[:limit]]
+            candidate_ids = [c[0] for c in filtered_candidates[:limit]]
 
             return self._get_candidates_by_ids(candidate_ids)
             
@@ -173,12 +194,12 @@ class SearchService:
                 query = query.filter(
                     'id',
                     'in',
-                    self.supabase.table('work_experience')
+                    ','.join(str(row['candidate_id']) for row in self.supabase.table('work_experience')
                     .select('candidate_id')
                     .filter('end_date', 'is', 'null')
                     .or_('end_date.gt.now()')
                     .execute()
-                    .data
+                    .data or [])
                 )
             
             if education_level:
@@ -186,11 +207,11 @@ class SearchService:
                 query = query.filter(
                     'id',
                     'in',
-                    self.supabase.table('education')
+                    ','.join(str(row['candidate_id']) for row in self.supabase.table('education')
                     .select('candidate_id')
                     .eq('degree', education_level)
                     .execute()
-                    .data
+                    .data or [])
                 )
             
             if skills:
@@ -198,18 +219,20 @@ class SearchService:
                 query = query.filter(
                     'id',
                     'in',
-                    self.supabase.table('candidate_skills')
+                    ','.join(str(row['candidate_id']) for row in self.supabase.table('candidate_skills')
                     .select('candidate_id')
                     .filter(
                         'skill_id',
                         'in',
-                        self.supabase.table('skills')
-                        .select('id')
-                        .in_('name', skills)
-                        .execute()
-                        .data
+                        ','.join(str(row['id']) for row in self.supabase.table('skills')
+                            .select('id')
+                            .in_('name', ','.join(skills))
+                            .execute()
+                            .data or [])
                     )
                     .execute()
+                    .data or []
+                )
                     .data
                 )
             
